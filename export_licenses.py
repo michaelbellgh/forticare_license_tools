@@ -1,13 +1,26 @@
 from csv import DictWriter
 import requests
+import argparse
 
-import credentials
+
+'''
+Credentials will need to specified in a separate Python file in this format:
+-----
+
+username = {MY FORTICARE ACCOUNT ID HERE}
+password = {MY FORTICARE API TOKEN HERE}
+
+----
+You can obtain these credentials by creating a API user account, as described here: https://community.fortinet.com/t5/FortiCloud-Products/Technical-Tip-API-how-to-retrieve-list-of-registered-units-for/ta-p/194760
+They can also be specified by the --account-id and --api-token
+
+'''
 
 
 def get_oauth_token(api_username: str, api_password: str, client_id: str = "assetmanagement", base_url: str = "https://customerapiauth.fortinet.com/api/v1/oauth/token/") -> dict:
     body = {"username": api_username,
       "password": api_password,
-      "client_id": "assetmanagement",
+      "client_id": client_id,
       "grant_type": "password"}
     
     response = requests.post(base_url, json=body).json()
@@ -17,10 +30,6 @@ def get_oauth_token(api_username: str, api_password: str, client_id: str = "asse
 def get_device_list(oauth_token: str, serial_num_filter: str = "F", base_url: str ="https://support.fortinet.com/ES/api/registration/v3/products/list") -> dict:
     response = requests.post(base_url, headers={"Authorization":  "Bearer " + oauth_token}, json={"serialNumber": serial_num_filter})
     return response.json()
-
-
-#def write
-
 
 
 def write_assets_to_csv(output_csv: str, assets_json: dict) -> None:
@@ -41,6 +50,34 @@ def write_assets_to_csv(output_csv: str, assets_json: dict) -> None:
     writer.writerow(row)
 
 
-token = get_oauth_token(credentials.username, credentials.password)["access_token"]
-data = get_device_list(token)
-write_assets_to_csv("output.csv", data)
+def main() -> None:
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--output-csv", default="output.csv")
+    parser.add_argument("--account-id", help="The FortiCare account ID")
+    parser.add_argument("--api-token", help="The FortiCare account API token")
+
+    args = parser.parse_args()
+
+    account_id, api_token = None, None
+
+    if not args.account_id or not args.api_token:
+      import credentials
+      account_id = credentials.username
+      api_token = credentials.password
+    else:
+      account_id = args.account_id
+      api_token = args.api_token
+
+    token = get_oauth_token(account_id, api_token)
+    if 'access_token' in token:
+      token = token["access_token"]
+    else:
+      raise Exception("Could not obtain OAuth token\nToken object: " + str(token))
+
+    data = get_device_list(token)
+    write_assets_to_csv(args.output_csv, data)
+
+main()
+    
+

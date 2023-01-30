@@ -1,0 +1,17 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": ["generate_contract_move", "output.csv", "-m", "FortiGate 60F:FC-10-0060F-950-02-36:1", "-m", "FortiGate 60F:FC-10-0060F-288-02-12:3"]
+        }
+    ]
+}

@@ -54,42 +54,97 @@ def get_contract_list(input_csv_filename: str) -> list:
     with csv_file:
       return list(DictReader(csv_file))
 
-def get_loose_contracts(asset_json: dict, mapping_dict: dict) -> list:
+def get_loose_contracts(asset_json: dict, mapping_dict: dict, equalSkus: dict, contracts: list=None) -> list:
     loose_items = []
+    burnt_contracts = []
     for asset in asset_json["assets"]:
         #For every instance of our mapping dictionary if it matches our current asset model
         for mapping in [v for k,v in  mapping_dict.items() if k == asset["productModel"]]:
             for sku in mapping:
+                equal_skus = []
+                if sku in equalSkus:
+                    equal_skus = equalSkus[sku]
                 #Get the currently assigned contracts of type SKU X
-                skus_assigned = [x for x in asset["contracts"] if x["sku"] == sku]
+                skus_assigned = [x for x in asset["contracts"] if x["sku"] == sku or x["sku"] in equal_skus]
                 count_of_assigned_sku = len(skus_assigned)
                 if count_of_assigned_sku > int(mapping[sku]):
                     #We have more of this SKU assigned than defined in the mapping, so lets add the last N (extras) to loose_items using splicing
-                    original_trailer_items = [skus_assigned[-(count_of_assigned_sku - int(mapping[sku]))]]
+                    original_trailer_items = skus_assigned[:count_of_assigned_sku - int(mapping[sku])]
                     for t_item in original_trailer_items:
+                        if t_item["contractNumber"] in burnt_contracts:
+                            continue
                         #We want to append the original SN to the loose contract entry
                         t_item.update({"originalSN": asset["serialNumber"]})
                         loose_items.append(t_item)
+                        burnt_contracts.append(t_item["contractNumber"])
+
+    #If a full contract listing is supplied (A CSV with all licenses (used or unused) with headers contract,model,sku headers at minimum)
+    if contracts is not None:
+        allocated_contracts = []
+        for asset in asset_json["assets"]:
+            if asset["contracts"] is None:
+                continue
+            for contract in asset["contracts"]:
+                allocated_contracts.append(contract)
+        #Add all unassigned but available contracts and add them to our loose contracts
+        unassigned_contracts = [x for x in contracts if x["contract"] not in [y["contractNumber"] for y in allocated_contracts]]
+        loose_items.extend([{"originalSN": "N/A", "sku": x["sku"], "contractNumber": x["contract"]} for x in unassigned_contracts])
     return loose_items
 
-def generate_contract_move_summary(contracts: list, loose_contracts: list, asset_json: dict, mapping_dict: dict) -> list:
+
+def generate_contract_move_summary(loose_contracts: list, asset_json: dict, mapping_dict: dict, equalSkus: dict) -> list:
     move_transactions = []
     allocated_contracts = []
+
+    for asset in asset_json["assets"]:
+        if asset["contracts"] is None:
+            continue
+        for contract in asset["contracts"]:
+            allocated_contracts.append(contract)
+
+    reassigned_contracts = []
+
     for asset in asset_json["assets"]:
         for mapping in [v for k,v in mapping_dict.items() if k == asset["productModel"]]:
             for sku in mapping:
-                skus_assigned = [x for x in asset["contracts"] if x["sku"] == sku]
+
+                #Build our SKU mappings (e.g. two different types of SKUs which give the same entitlement)
+                equal_skus = []
+                if sku in equalSkus:
+                    equal_skus = equalSkus[sku]
+
+                #Get the SKU's assigned to our current asset
+                skus_assigned = [x for x in asset["contracts"] if 
+                    (x["sku"] == sku or x["sku"] in equal_skus)]
                 count_of_assigned_sku = len(skus_assigned)
+
                 if count_of_assigned_sku < int(mapping[sku]):
                     #We dont have enough licenses applied
-                    free_contracts = [x for x in loose_contracts if x not in allocated_contracts and x["sku"] == sku]
-                    free_contracts_counter = len(free_contracts)
-                    for i in range(0, int(mapping[sku]) - count_of_assigned_sku):
-                        allocated_contracts.append([free_contracts[i]])
-                        free_contracts_counter -= 1
-                        move_transactions.append({"fromSN": free_contracts[i]["originalSN"], "contract": free_contracts[i]["contractNumber"], "toSN": asset["serialNumber"]})
-                        if free_contracts_counter <= 0:
-                            break
+
+                    shortfall_count = int(mapping[sku]) - count_of_assigned_sku
+
+                    #Get some eligble contracts that havent already been used
+                    eligble_contracts = [x for x in loose_contracts if (x["sku"] in equal_skus or x["sku"] == sku) and x["contractNumber"] not in [z["contractNumber"] for z in reassigned_contracts]]
+                    for i in range (0, shortfall_count):
+                        if i + 1 > len(eligble_contracts):
+                            #Run out of eligble contracts
+                            move_transactions.append({"originalSN": "N/A", "toSN": asset["serialNumber"], "sku": selected_contract["sku"], "contractNumber": "NONE AVAILABLE",
+                                "model": asset["productModel"]})
+                            continue
+                        if len(eligble_contracts) > 0:
+                            #We have some free contracts, lets add them to move_transactions
+                            selected_contract = eligble_contracts[i]
+                            reassigned_contracts.append(selected_contract)
+                            eligble_contracts.remove(selected_contract)
+                            move_transactions.append({"originalSN": selected_contract["originalSN"], "toSN": asset["serialNumber"], "sku": selected_contract["sku"], "contractNumber": selected_contract["contractNumber"],
+                                "model": asset["productModel"]})
+                        else:
+                            #No eligble contracts at all
+                            move_transactions.append({"originalSN": "N/A", "toSN": asset["serialNumber"], "sku": selected_contract["sku"], "contractNumber": "NONE AVAILABLE",
+                                "model": asset["productModel"]})
+                                
+
+
     return move_transactions
 
 
@@ -99,13 +154,15 @@ def main() -> None:
     #parser.add_argument("action", choices=["export_assignments", "generate_contract_move"], default="export-assignments")
     parser.add_argument("--account-id", help="The FortiCare account ID")
     parser.add_argument("--api-token", help="The FortiCare account API token")
+    parser.add_argument("--output-csv", default="output.csv")
     subparsers = parser.add_subparsers(dest="action")
     export_parser = subparsers.add_parser("export_assignments")
-    export_parser.add_argument("--output-csv", default="output.csv")
+    
 
     move_parser = subparsers.add_parser("generate_contract_move")
-    move_parser.add_argument("input_contracts", help="Input contracts CSV generated by forti_license_parser.py")
+    move_parser.add_argument("--input_contracts", help="Input contracts CSV generated by forti_license_parser.py")
     move_parser.add_argument("-m", "--mapping", action="append")
+    move_parser.add_argument("-e", "--equal-sku", action="append")
 
 
     args = parser.parse_args()
@@ -130,19 +187,55 @@ def main() -> None:
         data = get_device_list(token)
         write_assets_to_csv(args.output_csv, data)
     elif args.action == "generate_contract_move":
+        #Generate our SKU -> Entitlements mapping
         mappings = {}
         for mapping in args.mapping:
             split_arguments = mapping.split(":")
+
             if len(split_arguments) != 3:
                 raise Exception("Invalid mapping argument " + str(mapping))
             if split_arguments[0] not in mappings:
                 mappings[split_arguments[0]] = {}
+
             mappings[split_arguments[0]][split_arguments[1]] = split_arguments[2]
+        
+        equal_skus = {}
+        #Generate our SKU equivalencies
+        if args.equal_sku is not None:
+            for equal in args.equal_sku:
+                split_arguments = equal.split(":")
+
+                if len(split_arguments) != 2:
+                    raise Exception("Invalid SKU equal mapping " + str(equal))
+                
+                #Create our SKU : [EqualSKU1, EqualSKU2] structure
+                if split_arguments[0] not in equal_skus:
+                    equal_skus[split_arguments[0]] = []
+                if split_arguments[1] not in equal_skus[split_arguments[0]]:
+                    equal_skus[split_arguments[0]].append(split_arguments[1])
+
+                #Do the reverse (EqualSKU1: SKU)
+                if split_arguments[1] not in equal_skus:
+                    equal_skus[split_arguments[1]] = []
+                if split_arguments[0] not in equal_skus[split_arguments[1]]:
+                    equal_skus[split_arguments[1]].append(split_arguments[0])
+
+            
 
         asset_json = get_device_list(token)
-        contracts = get_contract_list(args.input_contracts)
-        loose_contracts = get_loose_contracts(asset_json, mappings)
-        print(generate_contract_move_summary(contracts, loose_contracts, asset_json, mappings))
+
+        contracts = None
+        if args.input_contract is not None:
+            contracts = get_contract_list(args.input_contracts)
+        loose_contracts = get_loose_contracts(asset_json, mappings, equal_skus, contracts)
+        move_summary = generate_contract_move_summary(loose_contracts, asset_json, mappings, equal_skus)
+
+        with open(args.output_filename, "w", newline='') as f:
+            writer = DictWriter(f, fieldnames=["originalSN", "model", "contractNumber", "sku", "toSN", "Description"])
+            writer.writeheader()
+            writer.writerows(move_summary)
+        
+
 
         
         

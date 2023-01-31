@@ -135,3 +135,4 @@ credentials.py
 
 # Ignore CSV files, don't want to store results output by the tool
 *.csv
+.vscode/*

@@ -65,8 +65,10 @@ def get_loose_contracts(asset_json: dict, mapping_dict: dict, equalSkus: dict) -
                 if sku in equalSkus:
                     equal_skus = equalSkus[sku]
                 #Get the currently assigned contracts of type SKU X
-                skus_assigned = [x for x in asset["contracts"] if x["sku"] == sku or x["sku"] in equal_skus]
-                count_of_assigned_sku = len(skus_assigned)
+                skus_assigned = None
+                if asset["contracts"] is not None:
+                    skus_assigned = [x for x in asset["contracts"] if (x["sku"] == sku or x["sku"] in equal_skus) and asset["contracts"] is not None]
+                count_of_assigned_sku = len(skus_assigned) if skus_assigned is not None else 0
                 if count_of_assigned_sku > 3:
                     print("here")
                 if count_of_assigned_sku > int(mapping[sku]):
@@ -104,8 +106,10 @@ def generate_contract_move_summary(contracts: list, loose_contracts: list, asset
                 equal_skus = []
                 if sku in equalSkus:
                     equal_skus = equalSkus[sku]
-                skus_assigned = [x for x in asset["contracts"] if x["sku"] == sku or x["sku"] in equal_skus]
-                count_of_assigned_sku = len(skus_assigned)
+                skus_assigned = None
+                if asset["contracts"] is not None:
+                    skus_assigned = [x for x in asset["contracts"] if x["sku"] == sku or x["sku"] in equal_skus]
+                count_of_assigned_sku = len(skus_assigned) if skus_assigned is not None else 0
                 if count_of_assigned_sku < int(mapping[sku]):
                     #We dont have enough licenses applied
                     shortfall_count = int(mapping[sku]) - count_of_assigned_sku

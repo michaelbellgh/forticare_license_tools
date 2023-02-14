@@ -135,4 +135,8 @@ credentials.py
 
 # Ignore CSV files, don't want to store results output by the tool
 *.csv
+<<<<<<< HEAD
+.vscode/
+=======
 .vscode/*
+>>>>>>> b50fbc74a609463488b8dd6f6d31c8404337fac0

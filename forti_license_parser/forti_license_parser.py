@@ -80,6 +80,23 @@ def extract_special_license_dict(fulltext):
 
     return {"contract": reg_code, "model" : model, "description": desc, "purchase_order": purchase_order, "qty": qty, "sku": sku, "license_type" : "VM Upgrade"}
 
+def extract_vdom_license(fulltext):
+    """
+    Extracts licenses from a VDOM contract
+    """
+    reg_code = re.search("(?<=Registration Code)[\s\:]+([a-zA-Z0-9\-]+)", fulltext).groups()[-1]
+    purchase_order = re.search("(?<=Sales Order)[\s\:]+([0-9]+)", fulltext, re.DOTALL).groups()[-1]
+
+    table_lines = re.search("(?<=" + reg_code + ")(\s+.+)*", fulltext).group().splitlines()
+    table_lines = [x for x in table_lines if x != ""]
+    qty = table_lines[4]
+    sku = table_lines[5]
+    desc = " ".join(table_lines[6:])
+    
+    model = desc
+
+    return {"contract": reg_code, "model" : model, "description": desc, "purchase_order": purchase_order, "qty": qty, "sku": sku, "license_type" : "ADOM Upgrade"}
+
 def extract_forti_nac_license_dict(fulltext):
     """
     Extracts licenses from a FortiNAC registration license.
@@ -142,6 +159,13 @@ def extract_license_dict(pdf_object):
     FNC-CA-VM
     FC-10-0060F-179-02-02
     FC-10-0060F-464-02-02
+    FC-10-F18HF-950-02-60
+    FC4-10-LV0VM-248-02-60
+    FC3-10-M3004-248-02-60
+    FMG-VM-100-UG
+    FG-VDOM-5-UG
+    FG-VDOM-15-UG
+
     """
     fulltext = ""
     for page in pdf_object:
@@ -156,6 +180,9 @@ def extract_license_dict(pdf_object):
     
     if any(x in fulltext for x in ("FortiManager VM", "FortiAnalyzer VM", "FortiCloud FAP management", "FortiNAC VM FortiNAC")):
         return extract_special_license_dict(fulltext)
+    
+    if "Virtual Domain License Add" in fulltext:
+        return extract_vdom_license(fulltext)
 
     contract_code = re.search("(?<=Contract Registration Code\n\:\n)[A-Z0-9]{12}", fulltext).group(0)
     coverage_line = re.search("((?P<unit>\d+)[ ]?(?P<unittype>(Year|Day|Month))(s)? coverage) for (.+)", fulltext)
